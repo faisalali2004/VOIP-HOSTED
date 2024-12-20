@@ -1,17 +1,14 @@
-import os
 import socket
 import threading
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
 
 # Constants
 HOST = '0.0.0.0'
-PORT = int(os.environ.get("PORT", 12346))
+PORT = 12346
 BUFF_SIZE = 1024
 
-clients = {}
-user_sessions = {}
-lock = threading.Lock()
+clients = {}  # Map connections to usernames
+user_sessions = {}  # Map usernames to session info (IP, port, status)
 
 def initialize_database():
     """Initialize the SQLite database."""
@@ -47,16 +44,14 @@ def register_user(username, password):
 
 def notify_disconnection(username):
     """Notify other users that a user has disconnected."""
-    with lock:
-        for user, session in user_sessions.items():
-            if user != username:
-                try:
-                    session['connection'].send(f'{username} has disconnected.'.encode('utf-8'))
-                except Exception:
-                    pass
+    for user, session in user_sessions.items():
+        if user != username:
+            try:
+                session['connection'].send(f'{username} has disconnected.'.encode('utf-8'))
+            except Exception:
+                pass
 
 def handle_client(conn, addr):
-    conn.settimeout(30)
     conn.send(b'Welcome! Type "login" to log in or "register" to create an account: ')
     while True:
         try:
@@ -69,9 +64,8 @@ def handle_client(conn, addr):
 
                 if authenticate_user(username, password):
                     conn.send(b'Login successful. You are idle. Type a username to communicate or "exit" to logout: ')
-                    with lock:
-                        user_sessions[username] = {'ip': addr[0], 'port': addr[1], 'status': 'online', 'connection': conn}
-                        clients[conn] = username
+                    user_sessions[username] = {'ip': addr[0], 'port': addr[1], 'status': 'online', 'connection': conn}
+                    clients[conn] = username
                     break
                 else:
                     conn.send(b'Invalid credentials. Try again: ')
@@ -121,6 +115,7 @@ def handle_client(conn, addr):
                             except Exception:
                                 break
 
+                    # Create threads for bidirectional communication
                     thread1 = threading.Thread(target=relay_data, args=(conn, target_conn))
                     thread2 = threading.Thread(target=relay_data, args=(target_conn, conn))
                     thread1.start()
@@ -135,11 +130,11 @@ def handle_client(conn, addr):
         except ConnectionResetError:
             break
 
-    with lock:
-        if username in user_sessions:
-            user_sessions.pop(username)
-        if conn in clients:
-            clients.pop(conn)
+    # Cleanup after disconnection
+    if username in user_sessions:
+        user_sessions.pop(username)
+    if conn in clients:
+        clients.pop(conn)
     notify_disconnection(username)
     conn.close()
 
@@ -150,15 +145,13 @@ def start_server():
     server_socket.listen(5)
     print(f"Server listening on {HOST}:{PORT}")
 
-    executor = ThreadPoolExecutor(max_workers=50)
     while True:
-        try:
-            conn, addr = server_socket.accept()
-            executor.submit(handle_client, conn, addr)
-        except Exception as e:
-            print(f"Error: {e}")
+        conn, addr = server_socket.accept()
+        threading.Thread(target=handle_client, args=(conn, addr)).start()
 
     server_socket.close()
 
 if __name__ == '__main__':
-    start_server()
+    threading.Thread(target=start_server, daemon=True).start()
+    print("Server started in a separate thread.")
+    input("Press Enter to exit...\n")
