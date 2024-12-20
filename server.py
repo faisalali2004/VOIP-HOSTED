@@ -1,11 +1,11 @@
-import os
+# server.py
 import socket
 import threading
 import sqlite3
 
 # Constants
 HOST = '0.0.0.0'
-PORT = int(os.getenv('PORT', 12346))  # Use PORT from environment or fallback to 12346
+PORT = 12346
 BUFF_SIZE = 1024
 
 clients = {}  # Map connections to usernames
